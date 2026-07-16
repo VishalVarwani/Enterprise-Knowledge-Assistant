@@ -147,9 +147,10 @@ class FaithfulnessGuard:
                 unfaithful_sentences=[],
                 context_used=context,
             )
+        answer_clean = re.sub(r'\[Source[^\]]*\]', '', answer).strip()
 
         # Split answer into meaningful sentences
-        sentences = self._split_sentences(answer)
+        sentences = self._split_sentences(answer_clean)
         if not sentences:
             return FaithfulnessResult(
                 is_faithful=True,

@@ -190,10 +190,10 @@ class Settings(BaseSettings):
         ),
     )
     TOPIC_SIMILARITY_THRESHOLD: float = Field(
-        default=0.35,
+        default=0.10,
         description=(
             "Cosine similarity below this → off-topic refusal. "
-            "0.35 empirically chosen; tune on your eval set."
+            "0.10 empirically chosen; tune on your eval set."
         ),
     )
     # Faithfulness guard: NLI model checks if answer is entailed by context.
@@ -241,6 +241,20 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Validators
     # ------------------------------------------------------------------
+    @field_validator("API_CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        """Accept both comma-separated string and JSON array in .env"""
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return ["http://localhost:8501"]
+            if v.startswith("["):
+                import json
+                return json.loads(v)
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
     @field_validator("HYBRID_SEMANTIC_WEIGHT", "HYBRID_KEYWORD_WEIGHT")
     @classmethod
     def weights_must_be_positive(cls, v: float) -> float:

@@ -57,6 +57,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS documents_updated_at ON documents;
 CREATE TRIGGER documents_updated_at
     BEFORE UPDATE ON documents
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
@@ -168,9 +169,13 @@ ALTER TABLE query_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE guardrail_violations ENABLE ROW LEVEL SECURITY;
 
 -- Service role full access (used by backend)
+DROP POLICY IF EXISTS "service_role_all" ON documents;
 CREATE POLICY "service_role_all" ON documents FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "service_role_all" ON chunks;
 CREATE POLICY "service_role_all" ON chunks FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "service_role_all" ON query_logs;
 CREATE POLICY "service_role_all" ON query_logs FOR ALL TO service_role USING (true);
+DROP POLICY IF EXISTS "service_role_all" ON guardrail_violations;
 CREATE POLICY "service_role_all" ON guardrail_violations FOR ALL TO service_role USING (true);
 
 -- ============================================================

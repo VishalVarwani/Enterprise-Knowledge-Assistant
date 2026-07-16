@@ -401,7 +401,7 @@ if __name__ == "__main__":
     report.print_summary()
 
     # Save results
-    out_path = Path("evaluation/results/red_team_results.json")
+    out_path = Path(__file__).parent.parent.parent / "evaluation" / "results" / "red_team_results.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(

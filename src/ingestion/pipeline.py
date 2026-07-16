@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 import psycopg2
+import psycopg2.extras
 from loguru import logger
 from supabase import create_client, Client
 

@@ -1,91 +1,232 @@
 """
-main.py (Streamlit)
--------------------
-Enterprise Knowledge Assistant UI.
-
-UI sections:
-  1. Chat interface — query input, answer display, source citations
-  2. Document Manager — upload files / ingest URLs, list documents
-  3. Admin Panel    — cache stats, system health, guardrail logs
-
-Run:
-    streamlit run app/main.py
-
-Design: clean professional theme. Dark sidebar, white main area.
-Consistent with enterprise SaaS aesthetics (not colorful/playful).
+app/main.py — Enterprise Knowledge Assistant UI
+Redesigned: dark slate theme, explicit text colours, proper chat bubbles.
 """
 
 from __future__ import annotations
 
+import math
 import sys
 import time
 from pathlib import Path
+import re
 
 import httpx
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.config.settings import get_settings
 
-# --- Page config (must be first Streamlit call) ---
 st.set_page_config(
-    page_title="Enterprise Knowledge Assistant",
+    page_title="EKA · Enterprise Knowledge Assistant",
     page_icon="🏢",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# --- Custom CSS ---
 st.markdown("""
 <style>
-/* Main layout */
-.main .block-container { padding-top: 2rem; }
-
-/* Chat message styling */
-.user-message {
-    background: #f0f2f6;
-    border-left: 4px solid #4f46e5;
-    padding: 12px 16px;
-    border-radius: 0 8px 8px 0;
-    margin: 8px 0;
-}
-.assistant-message {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-left: 4px solid #059669;
-    padding: 12px 16px;
-    border-radius: 0 8px 8px 0;
-    margin: 8px 0;
-}
-.blocked-message {
-    background: #fff7ed;
-    border-left: 4px solid #f59e0b;
-    padding: 12px 16px;
-    border-radius: 0 8px 8px 0;
-    margin: 8px 0;
+/* ── Reset & base ─────────────────────────────────────────── */
+html, body, [data-testid="stAppViewContainer"] {
+    background: #0d1117 !important;
+    color: #e6edf3 !important;
 }
 
-/* Source card */
-.source-card {
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
-    padding: 8px 12px;
+/* ── Sidebar ──────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+    background: #161b22 !important;
+    border-right: 1px solid #30363d;
+}
+[data-testid="stSidebar"] * { color: #e6edf3 !important; }
+[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
+
+/* ── Main container ───────────────────────────────────────── */
+.main .block-container {
+    padding: 2rem 3rem 4rem 3rem;
+    max-width: 900px;
+}
+
+/* ── Page title ───────────────────────────────────────────── */
+h1 { color: #e6edf3 !important; font-weight: 700; letter-spacing: -0.5px; }
+h2, h3 { color: #c9d1d9 !important; }
+
+/* ── Chat bubbles ─────────────────────────────────────────── */
+.bubble-user {
+    background: #1f2937;
+    color: #f0f6fc !important;
+    border-left: 3px solid #58a6ff;
+    padding: 12px 16px;
+    border-radius: 0 10px 10px 0;
+    margin: 12px 0 4px 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+.bubble-assistant {
+    background: #161b22;
+    color: #e6edf3 !important;
+    border: 1px solid #30363d;
+    border-left: 3px solid #3fb950;
+    padding: 14px 18px;
+    border-radius: 0 10px 10px 0;
+    margin: 4px 0 4px 0;
+    font-size: 0.95rem;
+    line-height: 1.7;
+}
+.bubble-blocked {
+    background: #1a1206;
+    color: #e6edf3 !important;
+    border-left: 3px solid #d29922;
+    padding: 12px 16px;
+    border-radius: 0 10px 10px 0;
     margin: 4px 0;
-    font-size: 0.85em;
+    font-size: 0.95rem;
+}
+.bubble-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #8b949e !important;
+    margin-bottom: 2px;
 }
 
-/* Metric display */
-.metric-good { color: #059669; font-weight: 600; }
-.metric-warn { color: #d97706; font-weight: 600; }
-.metric-bad  { color: #dc2626; font-weight: 600; }
+/* ── Source cards ─────────────────────────────────────────── */
+.src-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 8px 14px;
+    margin: 5px 0;
+    font-size: 0.84rem;
+    color: #c9d1d9 !important;
+}
+.src-rank {
+    background: #21262d;
+    color: #58a6ff !important;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    min-width: 22px;
+    text-align: center;
+}
+.src-name { color: #e6edf3 !important; font-weight: 600; }
+.src-page { color: #8b949e !important; font-size: 0.8rem; }
+.src-score {
+    margin-left: auto;
+    background: #1f2937;
+    border-radius: 12px;
+    padding: 2px 10px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #3fb950 !important;
+}
 
-/* Sidebar header */
-section[data-testid="stSidebar"] .block-container { padding-top: 1rem; }
+/* ── Meta bar ─────────────────────────────────────────────── */
+.meta-bar {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    font-size: 0.76rem;
+    color: #8b949e !important;
+    margin: 6px 0 14px 4px;
+    align-items: center;
+}
+.meta-item { display: flex; align-items: center; gap: 4px; }
+.meta-good { color: #3fb950 !important; font-weight: 600; }
+.meta-warn { color: #d29922 !important; font-weight: 600; }
+.meta-bad  { color: #f85149 !important; font-weight: 600; }
+.pill-cached {
+    background: #0c2d6b;
+    color: #79c0ff !important;
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
 
-/* Hide streamlit branding */
+/* ── Status dots ──────────────────────────────────────────── */
+.dot-green { color: #3fb950 !important; }
+.dot-red   { color: #f85149 !important; }
+
+/* ── Inputs ───────────────────────────────────────────────── */
+[data-testid="stChatInput"] > div {
+    background: #161b22 !important;
+    border: 1px solid #30363d !important;
+    border-radius: 12px !important;
+}
+[data-testid="stChatInput"] textarea {
+    color: #e6edf3 !important;
+    background: transparent !important;
+}
+[data-testid="stChatInput"] textarea::placeholder { color: #484f58 !important; }
+
+/* ── Expander (sources) ───────────────────────────────────── */
+[data-testid="stExpander"] {
+    background: #161b22 !important;
+    border: 1px solid #30363d !important;
+    border-radius: 10px !important;
+}
+[data-testid="stExpander"] summary { color: #8b949e !important; font-size: 0.82rem; }
+
+/* ── Buttons ──────────────────────────────────────────────── */
+[data-testid="stButton"] button {
+    background: #21262d !important;
+    color: #c9d1d9 !important;
+    border: 1px solid #30363d !important;
+    border-radius: 8px !important;
+}
+[data-testid="stButton"] button:hover {
+    background: #30363d !important;
+    border-color: #58a6ff !important;
+    color: #e6edf3 !important;
+}
+
+/* ── File uploader ────────────────────────────────────────── */
+[data-testid="stFileUploader"] {
+    background: #161b22 !important;
+    border: 1px dashed #30363d !important;
+    border-radius: 10px !important;
+    color: #8b949e !important;
+}
+
+/* ── Tabs ─────────────────────────────────────────────────── */
+[data-testid="stTabs"] [role="tablist"] {
+    background: transparent !important;
+    border-bottom: 1px solid #30363d;
+}
+[data-testid="stTabs"] button[role="tab"] {
+    color: #8b949e !important;
+    font-size: 0.88rem;
+}
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+    color: #e6edf3 !important;
+    border-bottom: 2px solid #58a6ff !important;
+}
+
+/* ── Metrics ──────────────────────────────────────────────── */
+[data-testid="stMetric"] { background: #161b22; border-radius: 8px; padding: 12px; }
+[data-testid="stMetricLabel"] { color: #8b949e !important; font-size: 0.78rem !important; }
+[data-testid="stMetricValue"] { color: #e6edf3 !important; }
+
+/* ── Divider ──────────────────────────────────────────────── */
+hr { border-color: #21262d !important; }
+
+/* ── Radio ────────────────────────────────────────────────── */
+[data-testid="stRadio"] label { color: #c9d1d9 !important; font-size: 0.9rem; }
+
+/* ── Info / success / error alerts ───────────────────────── */
+[data-testid="stAlert"] { border-radius: 8px !important; }
+
+/* ── Caption ──────────────────────────────────────────────── */
+[data-testid="stCaptionContainer"] { color: #8b949e !important; }
+
+/* ── Hide streamlit footer ────────────────────────────────── */
 footer { visibility: hidden; }
+#MainMenu { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -93,403 +234,481 @@ settings = get_settings()
 API_BASE = f"http://localhost:{settings.API_PORT}"
 
 
-# ============================================================
-# API Client
-# ============================================================
+# ── Helpers ────────────────────────────────────────────────────────────────
 
-def api_query(question: str, filter_doc_ids: list[str] | None = None) -> dict:
-    """Call the /query endpoint."""
-    with httpx.Client(timeout=60.0) as client:
-        resp = client.post(
-            f"{API_BASE}/query",
-            json={"query": question, "filter_doc_ids": filter_doc_ids, "use_cache": True},
-        )
-        resp.raise_for_status()
-        return resp.json()
+def _sigmoid(x: float) -> float:
+    return 1 / (1 + math.exp(-x))
 
 
-def api_upload_file(data: bytes, filename: str) -> dict:
-    with httpx.Client(timeout=120.0) as client:
-        resp = client.post(
-            f"{API_BASE}/ingest/file",
-            files={"file": (filename, data)},
-        )
-        resp.raise_for_status()
-        return resp.json()
+# ── API client ─────────────────────────────────────────────────────────────
+
+def _get(path: str, timeout: float = 10.0) -> dict:
+    with httpx.Client(timeout=timeout) as c:
+        r = c.get(f"{API_BASE}{path}")
+        r.raise_for_status()
+        return r.json()
 
 
-def api_ingest_url(url: str) -> dict:
-    with httpx.Client(timeout=60.0) as client:
-        resp = client.post(f"{API_BASE}/ingest/url", json={"url": url})
-        resp.raise_for_status()
-        return resp.json()
+def _post(path: str, **kwargs) -> dict:
+    timeout = kwargs.pop("timeout", 60.0)
+    with httpx.Client(timeout=timeout) as c:
+        r = c.post(f"{API_BASE}{path}", **kwargs)
+        r.raise_for_status()
+        return r.json()
 
 
-def api_list_docs() -> dict:
-    with httpx.Client(timeout=15.0) as client:
-        resp = client.get(f"{API_BASE}/ingest/documents")
-        resp.raise_for_status()
-        return resp.json()
+def _delete(path: str) -> dict:
+    with httpx.Client(timeout=15.0) as c:
+        r = c.delete(f"{API_BASE}{path}")
+        r.raise_for_status()
+        return r.json()
 
 
-def api_delete_doc(doc_id: str) -> dict:
-    with httpx.Client(timeout=15.0) as client:
-        resp = client.delete(f"{API_BASE}/ingest/documents/{doc_id}")
-        resp.raise_for_status()
-        return resp.json()
+# ── Sidebar ────────────────────────────────────────────────────────────────
 
-
-def api_health() -> dict:
-    with httpx.Client(timeout=5.0) as client:
-        resp = client.get(f"{API_BASE}/health")
-        resp.raise_for_status()
-        return resp.json()
-
-
-def api_cache_stats() -> dict:
-    with httpx.Client(timeout=5.0) as client:
-        resp = client.get(f"{API_BASE}/cache/stats")
-        resp.raise_for_status()
-        return resp.json()
-
-
-def api_clear_cache() -> None:
-    with httpx.Client(timeout=10.0) as client:
-        client.post(f"{API_BASE}/cache/clear")
-
-
-# ============================================================
-# Sidebar
-# ============================================================
-
-def render_sidebar():
+def render_sidebar() -> str:
     with st.sidebar:
-        st.image("https://via.placeholder.com/200x50/4f46e5/ffffff?text=EKA", width=200)
-        st.markdown("**Enterprise Knowledge Assistant**")
-        st.caption(f"v{settings.APP_VERSION} · {settings.ENVIRONMENT}")
-        st.divider()
+        st.markdown(
+            '<div style="font-size:1.3rem;font-weight:700;color:#e6edf3;'
+            'letter-spacing:-0.3px;padding:4px 0 2px 0;">🏢 EKA</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div style="font-size:0.75rem;color:#8b949e;">Enterprise Knowledge Assistant'
+            f' · v{settings.APP_VERSION}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
 
         page = st.radio(
-            "Navigation",
-            ["💬 Chat", "📄 Documents", "⚙️ Admin"],
+            "nav",
+            ["💬  Chat", "📄  Documents", "⚙️  Admin"],
             label_visibility="collapsed",
         )
 
-        st.divider()
+        st.markdown("<hr style='margin:16px 0'>", unsafe_allow_html=True)
+        st.markdown(
+            '<div style="font-size:0.72rem;font-weight:600;letter-spacing:0.06em;'
+            'text-transform:uppercase;color:#484f58;margin-bottom:8px;">System</div>',
+            unsafe_allow_html=True,
+        )
 
-        # System status
-        st.caption("System Status")
         try:
-            health = api_health()
-            db_ok = health["database"] == "healthy"
+            h = _get("/health", timeout=4.0)
+            db = h.get("database", "")
+            llm = h.get("details", {}).get("llm_provider", "—")
+            emb = h.get("details", {}).get("voyage_model", "—")
+            ok = "healthy" in str(db)
             st.markdown(
-                f"{'🟢' if db_ok else '🔴'} Database: `{health['database']}`"
-            )
-            st.markdown(
-                f"🟢 LLM: `{health['details'].get('llm_provider', 'unknown')}`"
-            )
-            st.markdown(
-                f"🟢 Embedder: `{health['details'].get('voyage_model', 'unknown')}`"
+                f'<div style="font-size:0.82rem;line-height:2;">'
+                f'<span class="{"dot-green" if ok else "dot-red"}">{"●" if ok else "●"}</span>'
+                f' Database<br>'
+                f'<span class="dot-green">●</span> LLM: <code>{llm}</code><br>'
+                f'<span class="dot-green">●</span> Embedder: <code>{emb}</code>'
+                f'</div>',
+                unsafe_allow_html=True,
             )
         except Exception:
-            st.markdown("🔴 API not reachable — is `uvicorn api.main:app` running?")
+            st.markdown(
+                '<div style="font-size:0.82rem;color:#f85149;">● API offline</div>',
+                unsafe_allow_html=True,
+            )
 
         return page
 
 
-# ============================================================
-# Chat Page
-# ============================================================
+# ── Chat ───────────────────────────────────────────────────────────────────
 
 def render_chat():
-    st.title("💬 Enterprise Knowledge Assistant")
-    st.caption(
-        "Ask questions about company policies, procedures, and documentation. "
-        "All answers are grounded in your uploaded documents."
+    st.markdown(
+        '<h1 style="margin-bottom:4px;">Enterprise Knowledge Assistant</h1>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div style="color:#8b949e;font-size:0.88rem;margin-bottom:24px;">'
+        'Answers are grounded in your uploaded documents — every claim is cited.'
+        '</div>',
+        unsafe_allow_html=True,
     )
 
-    # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display history
+    # ── Render history ─────────────────────────────────────────────────────
     for msg in st.session_state.messages:
         if msg["role"] == "user":
             st.markdown(
-                f'<div class="user-message">🧑 {msg["content"]}</div>',
+                f'<div class="bubble-label">You</div>'
+                f'<div class="bubble-user">{msg["content"]}</div>',
                 unsafe_allow_html=True,
             )
-        elif msg["role"] == "assistant":
-            css_class = "blocked-message" if msg.get("blocked") else "assistant-message"
+        else:
+            bubble = "bubble-blocked" if msg.get("blocked") else "bubble-assistant"
             st.markdown(
-                f'<div class="{css_class}">🤖 {msg["content"]}</div>',
+                f'<div class="bubble-label">Assistant</div>'
+                f'<div class="{bubble}">{msg["content"]}</div>',
                 unsafe_allow_html=True,
             )
             if msg.get("sources"):
                 _render_sources(msg["sources"])
-            if msg.get("metadata"):
-                _render_response_metadata(msg["metadata"])
+            if msg.get("meta"):
+                _render_meta(msg["meta"])
 
-    # Query input
-    query = st.chat_input("Ask a question about company policies or procedures...")
+    # ── Input ──────────────────────────────────────────────────────────────
+    query = st.chat_input("Ask about company policies, procedures, benefits…")
 
     if query:
-        # Add user message
         st.session_state.messages.append({"role": "user", "content": query})
         st.markdown(
-            f'<div class="user-message">🧑 {query}</div>',
+            f'<div class="bubble-label">You</div>'
+            f'<div class="bubble-user">{query}</div>',
             unsafe_allow_html=True,
         )
 
-        with st.spinner("Searching knowledge base..."):
+        with st.spinner(""):
             try:
-                start = time.perf_counter()
-                result = api_query(query)
-                client_latency = int((time.perf_counter() - start) * 1000)
+                t0 = time.perf_counter()
+                result = _post(
+                    "/query",
+                    json={"query": query, "use_cache": True},
+                    timeout=90.0,
+                )
+                latency_ms = int((time.perf_counter() - t0) * 1000)
 
-                answer = result["answer"]
+                raw_answer = result.get("answer", "")
+                # Strip [Source: ...] and [SOURCE N: ...] tags — these are for internal citation
+                # tracking, not for users to read
+                answer = re.sub(r'\[Source[^\]]*\]', '', raw_answer).strip()
+                answer = re.sub(r'\s+', ' ', answer)  # clean up extra spaces left behind
                 sources = result.get("sources", [])
                 blocked = result.get("was_blocked", False)
 
-                css_class = "blocked-message" if blocked else "assistant-message"
+                bubble = "bubble-blocked" if blocked else "bubble-assistant"
                 st.markdown(
-                    f'<div class="{css_class}">🤖 {answer}</div>',
+                    f'<div class="bubble-label">Assistant</div>'
+                    f'<div class="{bubble}">{answer}</div>',
                     unsafe_allow_html=True,
                 )
 
                 if sources and not blocked:
                     _render_sources(sources)
 
-                metadata = {
-                    "cached": result.get("was_cached", False),
-                    "blocked": blocked,
-                    "block_reason": result.get("block_reason"),
-                    "model": result.get("model", ""),
-                    "latency_ms": result.get("latency_ms", client_latency),
-                    "faithfulness_score": result.get("faithfulness_score"),
-                    "grounding_score": result.get("grounding_score"),
-                    "tokens": result.get("prompt_tokens", 0) + result.get("completion_tokens", 0),
+                meta = {
+                    "cached":            result.get("was_cached", False),
+                    "blocked":           blocked,
+                    "block_reason":      result.get("block_reason", ""),
+                    "latency_ms":        result.get("latency_ms", latency_ms),
+                    "faithfulness":      result.get("faithfulness_score"),
+                    "grounding":         result.get("grounding_score"),
+                    "tokens":            (result.get("prompt_tokens", 0) or 0)
+                                       + (result.get("completion_tokens", 0) or 0),
+                    "model":             result.get("model", ""),
                 }
-                _render_response_metadata(metadata)
+                _render_meta(meta)
 
-                # Store in history
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": answer,
                     "blocked": blocked,
                     "sources": sources if not blocked else [],
-                    "metadata": metadata,
+                    "meta": meta,
                 })
 
             except httpx.ConnectError:
-                st.error("Cannot connect to API. Start with: `uvicorn api.main:app --reload`")
+                st.error("API is not running. Start it with `uvicorn api.main:app --reload`")
             except httpx.HTTPStatusError as e:
-                st.error(f"API error {e.response.status_code}: {e.response.text}")
+                st.error(f"API returned {e.response.status_code}: {e.response.text[:300]}")
             except Exception as e:
-                st.error(f"Unexpected error: {e}")
+                st.error(f"Error: {e}")
 
-    # Clear chat button
     if st.session_state.messages:
-        if st.button("Clear conversation", key="clear_chat"):
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Clear conversation"):
             st.session_state.messages = []
             st.rerun()
 
 
 def _render_sources(sources: list[dict]):
-    """Render source citation cards below an answer."""
     if not sources:
         return
-    with st.expander(f"📚 Sources ({len(sources)} documents)", expanded=False):
+    with st.expander(f"📎 {len(sources)} source{'s' if len(sources) != 1 else ''} used", expanded=False):
         for i, src in enumerate(sources, 1):
-            score = src.get("rerank_score", 0) or 0
-            page = f", p. {src['page_number']}" if src.get("page_number") else ""
-            type_icon = {"pdf": "📄", "docx": "📝", "web": "🌐"}.get(
+            raw = src.get("rerank_score", 0) or 0
+            pct = _sigmoid(raw)
+            page_str = f", p. {src['page_number']}" if src.get("page_number") else ""
+            icon = {"pdf": "📄", "docx": "📝", "web": "🌐"}.get(
                 src.get("doc_source_type", ""), "📄"
             )
+            name = src.get("document_name", "Unknown")
             st.markdown(
-                f'<div class="source-card">'
-                f'{type_icon} <strong>[{i}] {src["document_name"]}</strong>{page} '
-                f'<span style="color: #9ca3af">· relevance: {score:.2f}</span>'
-                f"</div>",
+                f'<div class="src-card">'
+                f'<span class="src-rank">{i}</span>'
+                f'{icon}&nbsp;'
+                f'<span class="src-name">{name}</span>'
+                f'<span class="src-page">{page_str}</span>'
+                f'<span class="src-score">{pct:.0%} match</span>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
 
 
-def _render_response_metadata(meta: dict):
-    """Render small metadata row: cache/latency/scores."""
+def _render_meta(meta: dict):
     parts = []
 
     if meta.get("cached"):
-        parts.append("⚡ Cached")
+        parts.append('<span class="pill-cached">⚡ Cached</span>')
+
     if meta.get("blocked"):
-        parts.append(f"🛡️ Blocked: {meta.get('block_reason', '')}")
-    if meta.get("latency_ms"):
-        parts.append(f"⏱️ {meta['latency_ms']}ms")
-    if meta.get("faithfulness_score") is not None:
-        f_score = meta["faithfulness_score"]
-        color = "metric-good" if f_score >= 0.8 else "metric-warn" if f_score >= 0.5 else "metric-bad"
-        parts.append(f'<span class="{color}">🎯 Faithfulness: {f_score:.2f}</span>')
-    if meta.get("tokens"):
-        parts.append(f"🔢 {meta['tokens']} tokens")
+        reason = meta.get("block_reason", "")
+        parts.append(f'<span class="meta-warn">🛡 Blocked{": " + reason if reason else ""}</span>')
+
+    ms = meta.get("latency_ms")
+    if ms:
+        parts.append(f'<span class="meta-item">⏱ {ms:,}ms</span>')
+
+    f_score = meta.get("faithfulness")
+    if f_score is not None:
+        cls = "meta-good" if f_score >= 0.8 else "meta-warn" if f_score >= 0.5 else "meta-bad"
+        parts.append(f'<span class="{cls}">🎯 Faith: {f_score:.0%}</span>')
+
+    g_score = meta.get("grounding")
+    if g_score is not None and g_score > 0:
+        cls = "meta-good" if g_score >= 0.7 else "meta-warn"
+        parts.append(f'<span class="{cls}">📌 Grounding: {g_score:.0%}</span>')
+
+    tokens = meta.get("tokens")
+    if tokens:
+        parts.append(f'<span class="meta-item" style="color:#484f58;">{tokens:,} tokens</span>')
+
+    model = meta.get("model", "")
+    if model:
+        parts.append(f'<span class="meta-item" style="color:#484f58;">{model}</span>')
 
     if parts:
         st.markdown(
-            f'<div style="font-size: 0.78em; color: #9ca3af; margin-top: 4px">'
-            + " · ".join(parts)
-            + "</div>",
+            '<div class="meta-bar">' + "".join(parts) + "</div>",
             unsafe_allow_html=True,
         )
 
 
-# ============================================================
-# Document Manager Page
-# ============================================================
+# ── Documents ──────────────────────────────────────────────────────────────
 
 def render_documents():
-    st.title("📄 Document Manager")
+    st.markdown('<h1>Document Manager</h1>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="color:#8b949e;font-size:0.88rem;margin-bottom:24px;">'
+        'Upload PDFs or DOCX files — the app chunks, embeds, and indexes them automatically.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-    tab_upload, tab_url, tab_list = st.tabs(["Upload File", "Ingest URL", "View Documents"])
+    tab_up, tab_url, tab_list = st.tabs(["  Upload file  ", "  Ingest URL  ", "  View documents  "])
 
-    with tab_upload:
-        st.subheader("Upload PDF or DOCX")
+    with tab_up:
+        st.markdown("<br>", unsafe_allow_html=True)
         uploaded = st.file_uploader(
-            "Choose a file",
+            "Drop a PDF or Word document here",
             type=["pdf", "docx"],
-            help="Supported: PDF (.pdf) and Word documents (.docx)",
+            label_visibility="visible",
         )
-        if uploaded and st.button("Ingest Document", type="primary"):
-            with st.spinner(f"Ingesting {uploaded.name}..."):
-                try:
-                    result = api_upload_file(uploaded.getvalue(), uploaded.name)
-                    if result.get("was_duplicate"):
-                        st.info(f"ℹ️ Duplicate: **{uploaded.name}** was already ingested.")
-                    else:
-                        st.success(
-                            f"✅ Ingested **{uploaded.name}** · "
-                            f"{result['chunks_created']} chunks created"
+        if uploaded:
+            st.markdown(
+                f'<div style="color:#8b949e;font-size:0.82rem;margin:6px 0 12px 0;">'
+                f'Ready: <strong style="color:#e6edf3">{uploaded.name}</strong>'
+                f' ({len(uploaded.getvalue()) / 1024:.0f} KB)</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button("Ingest document →", type="primary"):
+                with st.spinner(f"Processing {uploaded.name}…"):
+                    try:
+                        r = _post(
+                            "/ingest/file",
+                            files={"file": (uploaded.name, uploaded.getvalue())},
+                            timeout=120.0,
                         )
-                except Exception as e:
-                    st.error(f"Upload failed: {e}")
+                        if r.get("was_duplicate"):
+                            st.info(f"Already in knowledge base — no changes made.")
+                        else:
+                            st.success(f"✓ Ingested · {r['chunks_created']} chunks indexed")
+                    except Exception as e:
+                        st.error(f"Failed: {e}")
 
     with tab_url:
-        st.subheader("Ingest Web Page")
-        url = st.text_input("URL", placeholder="https://company.com/policy-page")
-        if url and st.button("Ingest URL", type="primary"):
-            with st.spinner(f"Fetching {url}..."):
+        st.markdown("<br>", unsafe_allow_html=True)
+        url = st.text_input(
+            "Web page URL",
+            placeholder="https://company.com/hr-policy",
+            label_visibility="visible",
+        )
+        if url and st.button("Ingest URL →", type="primary"):
+            with st.spinner("Fetching and indexing…"):
                 try:
-                    result = api_ingest_url(url)
-                    if result.get("was_duplicate"):
-                        st.info(f"ℹ️ Duplicate: this URL was already ingested.")
+                    r = _post("/ingest/url", json={"url": url})
+                    if r.get("was_duplicate"):
+                        st.info("Already in knowledge base.")
                     else:
-                        st.success(
-                            f"✅ Ingested **{result['document_name']}** · "
-                            f"{result['chunks_created']} chunks"
-                        )
+                        st.success(f"✓ Ingested · {r['chunks_created']} chunks indexed")
                 except Exception as e:
-                    st.error(f"Ingestion failed: {e}")
+                    st.error(f"Failed: {e}")
 
     with tab_list:
-        st.subheader("Knowledge Base Documents")
-        if st.button("Refresh"):
-            st.rerun()
+        st.markdown("<br>", unsafe_allow_html=True)
+        col_r, col_s = st.columns([1, 6])
+        with col_r:
+            if st.button("↻ Refresh"):
+                st.rerun()
+
         try:
-            data = api_list_docs()
+            data = _get("/ingest/documents")
             docs = data.get("documents", [])
             if not docs:
-                st.info("No documents ingested yet. Upload some files to get started.")
+                st.markdown(
+                    '<div style="color:#8b949e;text-align:center;padding:40px;">'
+                    'No documents yet. Upload one in the Upload tab.'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
             else:
-                st.caption(f"{data['total']} document(s) in knowledge base")
+                st.markdown(
+                    f'<div style="color:#8b949e;font-size:0.8rem;margin-bottom:12px;">'
+                    f'{data["total"]} document(s) in knowledge base</div>',
+                    unsafe_allow_html=True,
+                )
                 for doc in docs:
-                    type_icon = {"pdf": "📄", "docx": "📝", "web": "🌐"}.get(
+                    icon = {"pdf": "📄", "docx": "📝", "web": "🌐"}.get(
                         doc.get("source_type", ""), "📄"
                     )
-                    col1, col2, col3 = st.columns([5, 2, 1])
+                    col1, col2, col3, col4 = st.columns([5, 2, 2, 1])
                     with col1:
-                        st.markdown(f"{type_icon} **{doc['name']}**")
-                        st.caption(f"{doc['source_path'][:80]}")
+                        st.markdown(
+                            f'<div style="color:#e6edf3;font-weight:600;font-size:0.9rem;">'
+                            f'{icon} {doc["name"]}</div>'
+                            f'<div style="color:#484f58;font-size:0.76rem;">'
+                            f'{doc.get("source_path","")[:70]}</div>',
+                            unsafe_allow_html=True,
+                        )
                     with col2:
-                        st.caption(f"{doc['total_chunks']} chunks")
-                        st.caption(doc["created_at"][:10])
+                        st.markdown(
+                            f'<div style="color:#8b949e;font-size:0.8rem;">'
+                            f'{doc["total_chunks"]} chunks</div>',
+                            unsafe_allow_html=True,
+                        )
                     with col3:
-                        if st.button("🗑️", key=f"del_{doc['id']}", help="Delete document"):
+                        st.markdown(
+                            f'<div style="color:#8b949e;font-size:0.8rem;">'
+                            f'{doc.get("created_at","")[:10]}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with col4:
+                        if st.button("🗑", key=f"del_{doc['id']}"):
                             try:
-                                api_delete_doc(doc["id"])
-                                st.success("Deleted")
+                                _delete(f"/ingest/documents/{doc['id']}")
                                 st.rerun()
                             except Exception as e:
                                 st.error(str(e))
-                    st.divider()
+                    st.markdown(
+                        '<hr style="margin:8px 0;border-color:#21262d;">',
+                        unsafe_allow_html=True,
+                    )
         except Exception as e:
             st.error(f"Could not load documents: {e}")
 
 
-# ============================================================
-# Admin Panel Page
-# ============================================================
+# ── Admin ──────────────────────────────────────────────────────────────────
 
 def render_admin():
-    st.title("⚙️ Admin Panel")
+    st.markdown('<h1>Admin</h1>', unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("System Health")
+        st.markdown(
+            '<div style="font-size:0.85rem;font-weight:600;color:#c9d1d9;'
+            'margin-bottom:12px;">System health</div>',
+            unsafe_allow_html=True,
+        )
         try:
-            health = api_health()
-            for key, val in health.items():
-                if key == "details":
-                    continue
-                icon = "🟢" if "healthy" in str(val) or val == "healthy" else "🔴"
-                st.markdown(f"{icon} **{key}**: `{val}`")
-            if health.get("details"):
+            h = _get("/health")
+            rows = [(k, v) for k, v in h.items() if k != "details"]
+            for k, v in rows:
+                ok = "healthy" in str(v) or v == "healthy"
+                dot = '<span style="color:#3fb950">●</span>' if ok else '<span style="color:#f85149">●</span>'
+                st.markdown(
+                    f'<div style="font-size:0.85rem;padding:4px 0;">'
+                    f'{dot} <strong style="color:#c9d1d9">{k}</strong>: '
+                    f'<code style="color:#8b949e">{v}</code></div>',
+                    unsafe_allow_html=True,
+                )
+            if h.get("details"):
                 with st.expander("Details"):
-                    st.json(health["details"])
+                    st.json(h["details"])
         except Exception as e:
             st.error(f"Health check failed: {e}")
 
     with col2:
-        st.subheader("Cache")
+        st.markdown(
+            '<div style="font-size:0.85rem;font-weight:600;color:#c9d1d9;'
+            'margin-bottom:12px;">Query cache</div>',
+            unsafe_allow_html=True,
+        )
         try:
-            stats = api_cache_stats()
-            st.metric("Local cache entries", stats["local_cache_size"])
-            st.metric("TTL (seconds)", stats["ttl_seconds"])
+            s = _get("/cache/stats")
+            c1, c2 = st.columns(2)
+            c1.metric("Cached queries", s.get("local_cache_size", 0))
+            c2.metric("TTL", f"{s.get('ttl_seconds', 0)}s")
+            redis = s.get("redis_available", False)
             st.markdown(
-                f"Redis: {'🟢 Connected' if stats['redis_available'] else '🔴 Not available (using local)'}"
+                f'<div style="font-size:0.82rem;margin:8px 0;">'
+                f'Redis: {"<span style=\'color:#3fb950\'>● connected</span>" if redis else "<span style=\'color:#d29922\'>● using local fallback</span>"}'
+                f'</div>',
+                unsafe_allow_html=True,
             )
-            if st.button("🗑️ Clear Cache", type="secondary"):
-                api_clear_cache()
+            if st.button("Clear cache"):
+                with httpx.Client(timeout=10.0) as c:
+                    c.post(f"{API_BASE}/cache/clear")
                 st.success("Cache cleared")
         except Exception as e:
             st.error(f"Cache stats failed: {e}")
 
-    st.divider()
-    st.subheader("Configuration")
-    config = {
-        "LLM Provider": settings.LLM_PROVIDER,
-        "Voyage Model": settings.VOYAGE_MODEL,
-        "Chunk Size (tokens)": settings.CHUNK_SIZE,
-        "Retrieval Top-K": settings.RETRIEVAL_TOP_K,
-        "Rerank Top-N": settings.RERANK_TOP_N,
-        "Topic Similarity Threshold": settings.TOPIC_SIMILARITY_THRESHOLD,
-        "Faithfulness Threshold": settings.FAITHFULNESS_THRESHOLD,
-        "Cache TTL (seconds)": settings.CACHE_TTL_SECONDS,
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-size:0.85rem;font-weight:600;color:#c9d1d9;'
+        'margin-bottom:12px;">Active configuration</div>',
+        unsafe_allow_html=True,
+    )
+    cfg = {
+        "LLM provider":              settings.LLM_PROVIDER,
+        "Embedding model":           settings.VOYAGE_MODEL,
+        "Chunk size":                f"{settings.CHUNK_SIZE} tokens",
+        "Retrieval top-K":           settings.RETRIEVAL_TOP_K,
+        "Rerank top-N":              settings.RERANK_TOP_N,
+        "Topic threshold":           settings.TOPIC_SIMILARITY_THRESHOLD,
+        "Faithfulness threshold":    settings.FAITHFULNESS_THRESHOLD,
+        "Cache TTL":                 f"{settings.CACHE_TTL_SECONDS}s",
     }
-    for k, v in config.items():
-        st.markdown(f"**{k}**: `{v}`")
+    rows_html = "".join(
+        f'<div style="display:flex;justify-content:space-between;padding:6px 0;'
+        f'border-bottom:1px solid #21262d;font-size:0.84rem;">'
+        f'<span style="color:#8b949e">{k}</span>'
+        f'<code style="color:#58a6ff">{v}</code></div>'
+        for k, v in cfg.items()
+    )
+    st.markdown(
+        f'<div style="background:#161b22;border:1px solid #30363d;'
+        f'border-radius:10px;padding:4px 16px;">{rows_html}</div>',
+        unsafe_allow_html=True,
+    )
 
 
-# ============================================================
-# App Entry Point
-# ============================================================
+# ── Entry point ────────────────────────────────────────────────────────────
 
 def main():
     page = render_sidebar()
-
-    if "💬 Chat" in page:
+    if "Chat" in page:
         render_chat()
-    elif "📄 Documents" in page:
+    elif "Documents" in page:
         render_documents()
-    elif "⚙️ Admin" in page:
+    elif "Admin" in page:
         render_admin()
 
 

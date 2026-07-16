@@ -56,7 +56,7 @@ from src.evaluation.red_team import run_red_team, RED_TEAM_SCENARIOS
 
 
 DATASET_PATH = Path(__file__).parent / "dataset" / "qa_pairs.json"
-RESULTS_DIR = Path(__file__).parent / "results"
+RESULTS_DIR = Path("evaluation/results")
 
 
 def load_dataset(category_filter: str | None = None) -> list[dict]:
@@ -271,5 +271,14 @@ if __name__ == "__main__":
     if args.mode == "red-team":
         report = run_red_team()
         report.print_summary()
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        import json
+        from dataclasses import asdict
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        out = RESULTS_DIR / f"red_team_{ts}.json"
+        with open(out, "w") as f:
+            json.dump([asdict(r) for r in report.results], f, indent=2, default=str)
+        print(f"\nResults saved → {out}")
+
     elif args.mode in ("full", "metrics-only"):
         run_full_eval(category_filter=args.category)

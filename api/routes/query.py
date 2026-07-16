@@ -234,7 +234,7 @@ async def query_knowledge_base(
     logger.info(
         f"Query complete | latency={latency_ms}ms | "
         f"chunks={len(reranked_chunks)} | "
-        f"faithfulness={faithfulness_score:.2f if faithfulness_score else 'N/A'} | "
+        f"faithfulness={f'{faithfulness_score:.2f}' if faithfulness_score is not None else 'N/A'} | ..."
         f"tokens={generation.total_tokens()}"
     )
 

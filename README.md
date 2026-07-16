@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Enterprise Knowledge Assistant (EKA)
 
 A production-grade Retrieval-Augmented Generation (RAG) system for enterprise document Q&A. Built with **FastAPI**, **Streamlit**, **Supabase/pgvector**, **Voyage AI**, and **Groq/llama**, with strict grounding guardrails, hybrid search, and a full evaluation pipeline.

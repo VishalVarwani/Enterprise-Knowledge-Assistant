@@ -1,0 +1,103 @@
+version: "3.9"
+
+# ============================================================
+# Enterprise Knowledge Assistant — Docker Compose
+#
+# Services:
+#   redis    — Query cache (in-memory LRU fallback used if Redis is down)
+#   api      — FastAPI backend (uvicorn)
+#   ui       — Streamlit frontend
+#
+# Supabase runs remotely (cloud) — no local PG service needed.
+# Run:
+#   docker compose up --build
+#   docker compose up api ui   (skip rebuild)
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # Redis — query cache
+  # ----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: eka_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - eka_network
+
+  # ----------------------------------------------------------
+  # FastAPI backend
+  # ----------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: eka_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override Redis URL to use Docker service name
+      - REDIS_URL=redis://redis:6379/0
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_RELOAD=false
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      # Mount source for hot-reload in dev (set API_RELOAD=true)
+      - .:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s   # Allow model warm-up time
+    networks:
+      - eka_network
+
+  # ----------------------------------------------------------
+  # Streamlit frontend
+  # ----------------------------------------------------------
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    container_name: eka_ui
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Point Streamlit at the Docker service name
+      - API_HOST=api
+      - API_PORT=8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - eka_network
+
+networks:
+  eka_network:
+    driver: bridge
+
+volumes:
+  # Named volumes for any local model caches
+  huggingface_cache:
+    driver: local

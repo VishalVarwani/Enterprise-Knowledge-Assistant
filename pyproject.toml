@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "enterprise-knowledge-assistant"
+version = "1.0.0"
+description = "Enterprise RAG system with hybrid search, cross-encoder reranking, and guardrails"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Vishal", email = "vishal@example.com" },
+]
+keywords = [
+    "rag",
+    "retrieval-augmented-generation",
+    "enterprise",
+    "nlp",
+    "llm",
+    "vector-search",
+    "pgvector",
+    "guardrails",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "api*", "app*"]
+
+# ---- pytest ----
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--cov=src",
+    "--cov=api",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-fail-under=70",
+]
+markers = [
+    "unit: fast unit tests with no external dependencies",
+    "integration: tests that call real external APIs (Supabase, Voyage, Groq)",
+    "slow: tests that take more than 5 seconds",
+    "red_team: adversarial/security tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+# ---- ruff (linting) ----
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+ignore = ["E501", "B008", "N806"]
+exclude = ["notebooks/", "evaluation/"]
+
+# ---- mypy ----
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+strict = false
+exclude = ["notebooks/", "tests/"]

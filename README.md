@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Enterprise Knowledge Assistant (EKA)
 
 A production-grade Retrieval-Augmented Generation (RAG) system for enterprise document Q&A. Built with **FastAPI**, **Streamlit**, **Supabase/pgvector**, **Voyage AI**, and **Groq/llama**, with strict grounding guardrails, hybrid search, and a full evaluation pipeline.
@@ -332,3 +333,6 @@ All queries pass through a 5-layer guardrail pipeline:
 | Config | Pydantic Settings |
 | Testing | pytest + unittest.mock |
 | Containers | Docker + Docker Compose |
+=======
+# Enterprise-Knowledge-Assistant-
+>>>>>>> f234c80a7d7ef64f63faf8b9f05bb2cac94a4584
